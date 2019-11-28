@@ -1,5 +1,7 @@
 use std::cmp;
 use rand::Rng;
+use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign};
+use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 type Bits = u32;
 const NBITS: usize = 32;
@@ -174,6 +176,7 @@ impl BitString {
         self.resize((i << LOGBITS) + j + 1)
     }
 
+    #[inline]
     pub fn weight(&self) -> usize {
         let f = if self.limit() { Bits::count_zeros } else { Bits::count_ones };
         let mut w: usize = 0;
@@ -185,6 +188,7 @@ impl BitString {
 }
 
 impl Ord for BitString {
+    #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         let cl = self.limit().cmp(&other.limit());
         match cl {
@@ -205,12 +209,14 @@ impl Ord for BitString {
 }
 
 impl PartialOrd for BitString {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl PartialEq for BitString {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == cmp::Ordering::Equal
     }
@@ -242,6 +248,7 @@ macro_rules! from_copy {
     ( $f:ident, $( $type:ty ),* ) => {
         $(
             impl From<$type> for BitString {
+                #[inline]
                 fn from(n: $type) -> Self {
                     let bytes = <$type>::$f(n);
                     BitString::from(&bytes[..])
@@ -255,6 +262,7 @@ macro_rules! from_reference {
     ( $f:ident, $( $type:ty ),* ) => {
         $(
             impl From<&$type> for BitString {
+                #[inline]
                 fn from(n: &$type) -> Self {
                     let bytes = <$type>::$f(n);
                     BitString::from(&bytes[..])
@@ -267,6 +275,106 @@ macro_rules! from_reference {
 from_copy!(to_le_bytes, u8, u16, u32, u64, u128, usize);
 from_copy!(to_le_bytes, i8, i16, i32, i64, i128, isize);
 from_reference!(as_bytes, String, str);
+
+
+macro_rules! bit_operation_assign {
+    ( $trait:ident, $fn:ident ) => {
+        impl<'a> $trait<&'a BitString> for BitString {
+            #[inline]
+            fn $fn(&mut self, rhs: &'a Self) {
+                if self.size < rhs.size {
+                    self.resize(rhs.size);
+                }
+                for i in 0..self.bits.len() {
+                    <Bits>::$fn(&mut self.bits[i], rhs.bits(i));
+                }
+            }
+        }
+
+        impl $trait for BitString {
+            #[inline]
+            fn $fn(&mut self, rhs: Self) {
+                <BitString>::$fn(self, &rhs);
+            }
+        }
+    }
+}
+
+bit_operation_assign!(BitAndAssign, bitand_assign);
+bit_operation_assign!(BitOrAssign, bitor_assign);
+bit_operation_assign!(BitXorAssign, bitxor_assign);
+
+macro_rules! bit_operation {
+    ( $trait:ident, $fn:ident, $fna:ident ) => {
+        impl<'a> $trait<&'a BitString> for &BitString {
+            type Output = BitString;
+
+            #[inline]
+            fn $fn(self, rhs: &'a BitString) -> BitString {
+                let mut bs = self.clone();
+                <BitString>::$fna(&mut bs, rhs);
+                bs
+            }
+        }
+
+        impl $trait<BitString> for &BitString {
+            type Output = BitString;
+
+            #[inline]
+            fn $fn(self, rhs: BitString) -> BitString {
+                let mut bs = self.clone();
+                <BitString>::$fna(&mut bs, &rhs);
+                bs
+            }
+        }
+
+        impl<'a> $trait<&'a BitString> for BitString {
+            type Output = BitString;
+
+            #[inline]
+            fn $fn(self, rhs: &'a BitString) -> BitString {
+                let mut bs = self.clone();
+                <BitString>::$fna(&mut bs, rhs);
+                bs
+            }
+        }
+
+        impl $trait for BitString {
+            type Output = Self;
+
+            #[inline]
+            fn $fn(self, rhs: Self) -> Self::Output {
+                let mut bs = self.clone();
+                <BitString>::$fna(&mut bs, rhs);
+                bs
+            }
+        }
+    }
+}
+
+bit_operation!(BitAnd, bitand, bitand_assign);
+bit_operation!(BitOr, bitor, bitor_assign);
+bit_operation!(BitXor, bitxor, bitxor_assign);
+
+impl Not for &BitString {
+    type Output = BitString;
+
+    fn not(self) -> BitString {
+        let mut bs = self.clone();
+        for i in 0..self.bits.len() {
+            bs.bits[i] = !self.bits[i];
+        }
+        bs
+    }
+}
+
+impl Not for BitString {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        !&self
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -558,6 +666,56 @@ mod tests {
             let bs0 = BitString::from(n0);
             let bs1 = BitString::from(n1);
             assert_eq!(n0.cmp(&n1), bs0.cmp(&bs1));
+        }
+    }
+
+    macro_rules! test_operator {
+        ( $test:ident, $fn:ident ) => {
+            #[test]
+            fn $test() {
+                const RANGE: usize = 256;
+                let mut rng = rand::thread_rng();
+                for i in (0..RANGE).step_by(4) {
+                    for l0 in [false, true].iter() {
+                        let v0: Vec<u8> = (0..RANGE).map(|_| { rng.gen::<u8>() }).collect();
+                        let mut bs0 = BitString::from(&v0[..]);
+                        bs0.set_limit(*l0);
+                        for l1 in [false, true].iter() {
+                            let v1: Vec<u8> = (0..i).map(|_| { rng.gen::<u8>() }).collect();
+                            let mut bs1 = BitString::from(&v1[..]);
+                            bs1.set_limit(*l1);
+                            let bs2 = <&BitString>::$fn(&bs0, &bs1);
+                            for j in 0..(RANGE >> LOGBYTES) {
+                                assert_eq!(bs2.bits(j), <Bits>::$fn(bs0.bits(j), bs1.bits(j)));
+                            }
+                            assert_eq!(<bool>::$fn(bs0.limit(), bs1.limit()), <bool>::$fn(*l0, *l1));
+                            assert_eq!(bs2.size, RANGE << 3);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    test_operator!(test_operator_and, bitand);
+    test_operator!(test_operator_or, bitor);
+    test_operator!(test_operator_xor, bitxor);
+
+    #[test]
+    fn test_not() {
+        const RANGE: usize = 256;
+        for i in (0..RANGE).step_by(4) {
+            for l0 in [false, true].iter() {
+                let mut bs0 = BitString::random(i);
+                bs0.set_limit(*l0);
+                let bs1 = !&bs0;
+                for j in 0..bs0.bits.len() {
+                    assert_ne!(bs0.bits(j), bs1.bits(j));
+                }
+                assert_ne!(bs0.limit(), bs1.limit());
+                assert_eq!(bs0.bits.len(), bs1.bits.len());
+                assert_eq!(bs0.size, bs1.size);
+            }
         }
     }
 }
