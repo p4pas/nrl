@@ -1,0 +1,11 @@
+[package]
+name = "bench"
+version = "0.1.0"
+authors = ["gvgp <andreas.papageorgiou@protonmail.com>"]
+edition = "2018"
+
+[dependencies]
+nrl = {path = ".."}
+rand = "0.7.2"
+openssl = "0.10.25"
+rug = "1.6.0"

@@ -332,10 +332,9 @@ macro_rules! bit_operation {
             type Output = BitString;
 
             #[inline]
-            fn $fn(self, rhs: &'a BitString) -> BitString {
-                let mut bs = self.clone();
-                <BitString>::$fna(&mut bs, rhs);
-                bs
+            fn $fn(mut self, rhs: &'a BitString) -> BitString {
+                <BitString>::$fna(&mut self, rhs);
+                self
             }
         }
 
@@ -343,10 +342,9 @@ macro_rules! bit_operation {
             type Output = Self;
 
             #[inline]
-            fn $fn(self, rhs: Self) -> Self::Output {
-                let mut bs = self.clone();
-                <BitString>::$fna(&mut bs, rhs);
-                bs
+            fn $fn(mut self, rhs: Self) -> Self::Output {
+                <BitString>::$fna(&mut self, rhs);
+                self
             }
         }
     }
@@ -717,5 +715,13 @@ mod tests {
                 assert_eq!(bs0.size, bs1.size);
             }
         }
+    }
+
+
+    #[test]
+    fn test_borrow() {
+        let b = BitString::new();
+        let c = BitString::new();
+        let d = &b & &c;
     }
 }
